@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod startup;
+
 use proxy_pulse_core::{
     export::{self, ExportOptions, Payload},
     model::{AppError, AppResult, CheckSettings},
@@ -221,6 +223,8 @@ fn save_preferences(app: tauri::AppHandle, preferences: Preferences) -> AppResul
 }
 
 fn main() {
+    // Environment changes must precede every runtime, plugin and worker thread.
+    startup::configure_before_runtime();
     let state: SharedSession = Arc::new(Mutex::new(session::Session::default()));
     let result = tauri::Builder::default()
         .manage(state)

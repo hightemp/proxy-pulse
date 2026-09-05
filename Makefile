@@ -1,4 +1,4 @@
-.PHONY: help doctor install-deps dev preview build build-debug package test test-integration test-ui test-native lint format typecheck quality clean
+.PHONY: help doctor install-deps dev preview build build-debug package test test-integration test-ui test-native test-startup lint format typecheck quality clean
 
 help: ## Show available commands
 	@python3 scripts/doctor.py --help-targets
@@ -25,7 +25,11 @@ package: ## Build a native installer (Linux default: Debian package)
 	pnpm tauri build --bundles deb
 
 test: ## Run core contract and property tests
-	cargo test -p proxy-pulse-core --locked
+	cargo test --workspace --locked
+
+test-startup: ## Check the development WebView with ambient proxy variables (Linux WebDriver required)
+	cargo build -p proxy-pulse --locked
+	python3 scripts/proxy_environment_smoke.py
 
 test-integration: ## Check real protocols against local proxy fixtures
 	cargo build -p proxy-pulse-core --example check --locked

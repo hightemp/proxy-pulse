@@ -16,6 +16,8 @@ make dev
 
 `make dev` opens the native desktop app. `make preview` runs only the frontend in a browser; it clearly disables desktop operations and does not fabricate check results.
 
+The desktop process automatically adds loopback and Tauri's local hosts to both `NO_PROXY` and `no_proxy` before WebKit starts. Existing exclusions and HTTP/HTTPS proxy settings are preserved. This keeps the development UI at `127.0.0.1:1420` local when your shell has `HTTP_PROXY` configured; no shell or system configuration changes are needed. The checker still uses each explicitly selected proxy.
+
 ```sh
 make build-debug  # Standalone debug executable: target/debug/proxy-pulse
 make build        # Release executable: target/release/proxy-pulse
@@ -23,7 +25,7 @@ make package      # Linux Debian installer: target/release/bundle/deb/
 make help         # All commands
 ```
 
-Without Make, use `pnpm desktop`, `pnpm tauri build --no-bundle`, `pnpm tauri build --debug --no-bundle` and `cargo test -p proxy-pulse-core --locked`. Native Windows/macOS packaging must be checked on those systems before distributing a supported package.
+Without Make, use `pnpm desktop`, `pnpm tauri build --no-bundle`, `pnpm tauri build --debug --no-bundle` and `cargo test --workspace --locked`. Native Windows/macOS packaging must be checked on those systems before distributing a supported package.
 
 ## Import
 
@@ -90,6 +92,8 @@ make test-native
 The native script exercises actual Rust IPC, local proxies, the rendered WebView, clipboard groups, reports, search and cancellation. Results are written under ignored `artifacts/`. [Initial Linux evidence](docs/verification/initial-linux.md) distinguishes completed checks from remaining work.
 
 With xdotool available (on PATH or under `artifacts/xdotool/extracted/usr/bin/`), the Linux native test also drives the save/open choosers. It discovers the matching driver's isolated display and reports this optional coverage as `native_file_dialogs_verified`.
+
+`make test-startup` builds the development executable and tests its real WebView with uppercase/lowercase proxy variables and pre-existing exclusions. It manages its own Vite/WebDriver processes, uses an isolated proxy trap and verifies both local UI loading and explicit checker routing. It requires Xvfb, tauri-driver and WebKitWebDriver, found on PATH or in the test tool locations under `artifacts/`. See [the startup regression report](docs/verification/proxy-environment.md).
 
 ## Structure
 

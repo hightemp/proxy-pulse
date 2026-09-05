@@ -1,0 +1,39 @@
+{
+  "name": "proxy-pulse",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "packageManager": "pnpm@10.32.1",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "build": "tsc -b && vite build",
+    "typecheck": "tsc -b --pretty false",
+    "tauri": "tauri",
+    "desktop": "tauri dev",
+    "test": "cargo test -p proxy-pulse-core --locked",
+    "test:ui": "playwright test",
+    "lint": "tsc -b && cargo clippy --workspace --all-targets --locked -- -D warnings",
+    "format": "prettier --write src tests-ui *.json *.ts index.html && cargo fmt --all",
+    "format:check": "prettier --check src tests-ui *.json *.ts index.html && cargo fmt --all -- --check"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "2.11.1",
+    "lucide-react": "^0.577.0",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0",
+    "@tauri-apps/cli": "2.11.4",
+    "@types/node": "^22.20.1",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "prettier": "^3.8.0",
+    "typescript": "~5.9.3",
+    "vite": "6.4.3"
+  }
+}

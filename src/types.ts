@@ -1,0 +1,115 @@
+export type Protocol =
+  "auto" | "http" | "https" | "socks4" | "socks4a" | "socks5" | "socks5h";
+export type Status =
+  | "Unchecked"
+  | "Queued"
+  | "Checking"
+  | "Working"
+  | "Failed"
+  | "Inconclusive"
+  | "Cancelled"
+  | "Invalid";
+export interface AppError {
+  code: string;
+  message: string;
+}
+export interface Attempt {
+  protocol: Protocol;
+  detected: Protocol | null;
+  status: Status;
+  authentication: string;
+  code: string;
+  stage: string;
+  message: string;
+  durationMs: number;
+  exitIp: string | null;
+  checkUrl: string;
+}
+export interface CheckResult {
+  status: Status;
+  detected: Protocol | null;
+  authentication: string;
+  latencyMs: number | null;
+  totalDurationMs: number;
+  exitIp: string | null;
+  checkedAt: string;
+  code: string;
+  stage: string;
+  message: string;
+  checkUrl: string;
+  attempts: Attempt[];
+}
+export interface Row {
+  id: number;
+  address: string;
+  host: string;
+  port: number | null;
+  username: string;
+  hasCredentials: boolean;
+  requestedProtocol: Protocol;
+  protocol: Protocol;
+  status: Status;
+  label: string;
+  source: string;
+  line: number;
+  error: AppError | null;
+  result: CheckResult | null;
+}
+export interface Snapshot {
+  revision: number;
+  reset: boolean;
+  rows: Row[];
+  running: boolean;
+  runId: number;
+  scheduled: number;
+  completed: number;
+  total: number;
+  counts: Partial<Record<Status, number>>;
+}
+export interface Preview {
+  rows: Row[];
+  valid: number;
+  invalid: number;
+  duplicates: number;
+  ignored: number;
+  total: number;
+}
+export interface Settings {
+  url: string;
+  fallbackUrl: string;
+  ipEcho: boolean;
+  expectedStatus: number;
+  bodyContains: string;
+  concurrency: number;
+  rateLimit: number;
+  connectTimeoutMs: number;
+  attemptTimeoutMs: number;
+  totalTimeoutMs: number;
+  retries: number;
+}
+export interface ImportOptions {
+  format: string;
+  delimiter: string;
+  header: string;
+  columns: string[];
+  sourceName: string;
+}
+export interface ExportOptions {
+  scope: string;
+  format: string;
+  credentials: boolean;
+  ids: number[];
+}
+export const defaultSettings: Settings = {
+  url: "https://api64.ipify.org?format=json",
+  fallbackUrl: "",
+  ipEcho: true,
+  expectedStatus: 200,
+  bodyContains: "",
+  concurrency: 20,
+  rateLimit: 10,
+  connectTimeoutMs: 3000,
+  attemptTimeoutMs: 8000,
+  totalTimeoutMs: 45000,
+  retries: 0,
+};

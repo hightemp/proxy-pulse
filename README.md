@@ -2,7 +2,7 @@
 
 A local desktop proxy checker built with Tauri, Rust and React. Import a mixed list, verify real requests through each proxy, and copy or save the results.
 
-The first Linux implementation is available. Windows/macOS validation and the remaining PRD acceptance work are tracked in [TASKS.md](TASKS.md). Product requirements and the task plan are in Russian; the application and implementation documentation are in English.
+The first Linux implementation is available.
 
 ## Run the application
 

@@ -9,6 +9,7 @@ import {
 } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import ImportFormatHelp from "./ImportFormatHelp";
 import {
   Activity,
   ArrowDownToLine,
@@ -172,6 +173,7 @@ export default function App() {
     | "help"
     | null
   >(null);
+  const [helpReturnTo, setHelpReturnTo] = useState<"import" | null>(null);
   const [detailId, setDetailId] = useState<number | null>(null);
   const detail = rows.find((row) => row.id === detailId);
   const [rawText, setRawText] = useState<string | null>(null);
@@ -545,12 +547,18 @@ export default function App() {
               No account. No telemetry.
             </p>
           </div>
-          <button className="nav-item help" onClick={() => openModal("help")}>
+          <button
+            className="nav-item help"
+            onClick={() => {
+              setHelpReturnTo(null);
+              openModal("help");
+            }}
+          >
             <HelpCircle size={17} />
             Formats & help
           </button>
           <div className="version">
-            Proxy Pulse <span>v0.1.0</span>
+            Proxy Pulse <span>v{__APP_VERSION__}</span>
           </div>
         </div>
       </aside>
@@ -1083,6 +1091,16 @@ export default function App() {
             <div className="input-toolbar">
               <strong>{importOptions.sourceName}</strong>
               <div>
+                <button
+                  disabled={busy}
+                  onClick={() => {
+                    setHelpReturnTo("import");
+                    openModal("help");
+                  }}
+                >
+                  <HelpCircle size={15} />
+                  Supported formats
+                </button>
                 <button
                   disabled={busy}
                   onClick={() =>
@@ -1860,17 +1878,17 @@ export default function App() {
 
       {modal === "help" && (
         <Modal
-          title="Formats & help"
+          title={
+            helpReturnTo === "import"
+              ? "Supported import formats"
+              : "Formats & help"
+          }
           subtitle="Bring your existing lists. Proxy Pulse recognizes common proxy formats."
-          close={() => setModal(null)}
+          close={() => setModal(helpReturnTo)}
+          wide
         >
           <div className="modal-body">
-            <h3 className="subheading">One proxy per line</h3>
-            <pre className="format-examples">
-              {
-                "192.0.2.10:8080\nproxy.example:1080:demo-user:demo-pass socks5\ndemo-user:demo-pass@proxy.example:1080\nhttps://demo-user:demo-pass@proxy.example:8443\nsocks5h://demo%40user:p%3Ass@[2001:db8::10]:1080"
-              }
-            </pre>
+            <ImportFormatHelp />
             <p>
               Without a protocol, Auto tries HTTPS, SOCKS5 with remote DNS,
               HTTP, SOCKS4a and SOCKS4. Explicit protocols are respected. Use{" "}
@@ -1903,9 +1921,9 @@ export default function App() {
             </p>
           </div>
           <footer className="modal-footer">
-            <button className="primary" onClick={() => setModal(null)}>
+            <button className="primary" onClick={() => setModal(helpReturnTo)}>
               <CheckCheck size={17} />
-              Got it
+              {helpReturnTo === "import" ? "Back to import" : "Got it"}
             </button>
           </footer>
         </Modal>

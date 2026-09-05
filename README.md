@@ -21,15 +21,20 @@ The desktop process automatically adds loopback and Tauri's local hosts to both 
 ```sh
 make build-debug  # Standalone debug executable: target/debug/proxy-pulse
 make build        # Release executable: target/release/proxy-pulse
-make package      # Linux Debian installer: target/release/bundle/deb/
+make package      # Linux .deb + AppImage: target/release/bundle/
+make appimage     # Linux AppImage only
 make help         # All commands
 ```
 
 Without Make, use `pnpm desktop`, `pnpm tauri build --no-bundle`, `pnpm tauri build --debug --no-bundle` and `cargo test --workspace --locked`. Native Windows/macOS packaging must be checked on those systems before distributing a supported package.
 
+Application versions come from [VERSION](VERSION). Run `make version` after editing it; normal development/build commands also synchronize the package metadata automatically. `make release` creates and pushes the corresponding version tag from a clean, already-pushed commit, triggering GitHub Actions to build all platform packages and publish a release with linked commits and checksums. See [the release guide](docs/releases.md) for setup, `make release-dry-run`, AppImage builds and retry behavior.
+
 ## Import
 
 Use **Add proxies**, **Import file**, clipboard paste, or drop a UTF-8 TXT/CSV/TSV file onto the app. The preview shows valid records, errors and duplicates. Edit rejected records or keep them as Invalid rows for later correction. Appending is the default; replacing the list and keeping duplicates are explicit options.
+
+Choose **Supported formats** inside **Add proxies** for examples of every supported format family, CSV/TSV mappings, IPv6 and credential escaping. **Back to import** restores your input and preview. The same reference is available from **Formats & help** in the sidebar.
 
 ```text
 192.0.2.10:8080
@@ -91,7 +96,7 @@ make test-native
 
 The native script exercises actual Rust IPC, local proxies, the rendered WebView, clipboard groups, reports, search and cancellation. Results are written under ignored `artifacts/`. [Initial Linux evidence](docs/verification/initial-linux.md) distinguishes completed checks from remaining work.
 
-With xdotool available (on PATH or under `artifacts/xdotool/extracted/usr/bin/`), the Linux native test also drives the save/open choosers. It discovers the matching driver's isolated display and reports this optional coverage as `native_file_dialogs_verified`.
+With xdotool available (on PATH or under `artifacts/xdotool/extracted/usr/bin/`) and xclip on PATH, the Linux native test also drives the save/open choosers. It pastes paths to avoid GTK completion changing simulated keystrokes, discovers the matching driver's isolated display and reports this optional coverage as `native_file_dialogs_verified`.
 
 `make test-startup` builds the development executable and tests its real WebView with uppercase/lowercase proxy variables and pre-existing exclusions. It manages its own Vite/WebDriver processes, uses an isolated proxy trap and verifies both local UI loading and explicit checker routing. It requires Xvfb, tauri-driver and WebKitWebDriver, found on PATH or in the test tool locations under `artifacts/`. See [the startup regression report](docs/verification/proxy-environment.md).
 

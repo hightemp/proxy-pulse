@@ -1,4 +1,4 @@
-.PHONY: help doctor install-deps dev preview build build-debug package test test-integration test-ui test-native test-startup lint format typecheck quality clean
+.PHONY: help doctor install-deps version version-check dev preview build build-debug package appimage release release-dry-run release-notes test test-release test-integration test-ui test-native test-startup lint format typecheck quality clean
 
 help: ## Show available commands
 	@python3 scripts/doctor.py --help-targets
@@ -8,6 +8,12 @@ doctor: ## Check the local development environment
 
 install-deps: ## Install locked frontend dependencies
 	pnpm install --frozen-lockfile
+
+version: ## Synchronize application and package metadata from VERSION
+	node scripts/version.mjs sync
+
+version-check: ## Verify that committed package metadata matches VERSION
+	node scripts/version.mjs check
 
 dev: ## Launch the native desktop app in development mode
 	pnpm desktop
@@ -21,11 +27,28 @@ build: ## Build the release desktop executable
 build-debug: ## Build a standalone debug desktop executable
 	pnpm tauri build --debug --no-bundle
 
-package: ## Build a native installer (Linux default: Debian package)
-	pnpm tauri build --bundles deb
+package: ## Build native installers (Linux: Debian package and AppImage)
+	pnpm tauri build -- --locked
+
+package appimage: export APPIMAGE_EXTRACT_AND_RUN = 1
+
+appimage: ## Build the Linux AppImage
+	pnpm tauri build --bundles appimage -- --locked
+
+release: ## Tag committed VERSION and push the tag to trigger GitHub Release
+	node scripts/release.mjs publish
+
+release-dry-run: ## Validate and preview publication without creating or pushing a tag
+	node scripts/release.mjs publish --dry-run
+
+release-notes: ## Print release notes with commit links
+	node scripts/release.mjs notes
 
 test: ## Run core contract and property tests
 	cargo test --workspace --locked
+
+test-release: ## Test version synchronization and release publication safeguards
+	node --test scripts/tests/*.test.mjs
 
 test-startup: ## Check the development WebView with ambient proxy variables (Linux WebDriver required)
 	cargo build -p proxy-pulse --locked
@@ -47,14 +70,14 @@ lint: ## Check Rust and TypeScript without warnings
 
 format: ## Format Rust and frontend sources
 	cargo fmt --all
-	pnpm exec prettier --write src tests-ui *.json *.ts index.html src-tauri/*.json src-tauri/capabilities/*.json
+	pnpm exec prettier --write src tests-ui scripts/*.mjs scripts/tests/*.mjs *.json *.ts index.html src-tauri/*.json src-tauri/capabilities/*.json
 
 typecheck: ## Check frontend types
 	pnpm typecheck
 
 quality: ## Run format, static, contract and protocol checks
 	pnpm format:check
-	$(MAKE) lint test test-integration test-ui
+	$(MAKE) version-check lint test test-release test-integration test-ui
 
 clean: ## Remove only generated build and test output
 	cargo clean

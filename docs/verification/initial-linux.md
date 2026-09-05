@@ -2,6 +2,8 @@
 
 Date: 2026-09-05. This records a working implementation milestone, not full cross-platform MVP acceptance.
 
+This is the initial checkpoint. Later builds reuse the local artifact paths; their current packaging and checksums are described in [release automation verification](release-automation.md).
+
 ## Environment
 
 - Ubuntu userspace with glibc 2.39; Linux x86_64, kernel 7.0.0-30-generic.

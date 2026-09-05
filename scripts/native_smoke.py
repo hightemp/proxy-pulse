@@ -128,7 +128,8 @@ async def main():
             local_xdotool = ROOT / "artifacts/xdotool/extracted/usr/bin/xdotool"
             xdotool = str(local_xdotool) if local_xdotool.exists() else shutil.which("xdotool")
             environment = None
-            if xdotool and Path("/proc").exists():
+            xclip = shutil.which("xclip")
+            if xdotool and xclip and Path("/proc").exists():
                 for process in Path("/proc").iterdir():
                     if not process.name.isdigit():
                         continue
@@ -149,7 +150,10 @@ async def main():
                 output_path = Path(directory) / "native proxy results.txt"
                 async def choose_path(path):
                     await asyncio.sleep(.8)
-                    for args in [["key", "--clearmodifiers", "ctrl+l"], ["key", "--clearmodifiers", "ctrl+a"], ["type", "--clearmodifiers", "--delay", "40", str(path)], ["key", "--clearmodifiers", "Return"]]:
+                    # Paste the complete path: GTK completion can rewrite a path
+                    # while individual characters are injected through X11.
+                    await asyncio.to_thread(subprocess.run, [xclip, "-selection", "clipboard"], input=str(path).encode(), env=environment, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    for args in [["key", "--clearmodifiers", "ctrl+l"], ["key", "--clearmodifiers", "ctrl+a"], ["key", "--clearmodifiers", "ctrl+v"], ["key", "--clearmodifiers", "Return"]]:
                         await asyncio.to_thread(subprocess.run, [str(xdotool), *args], env=environment, check=True, capture_output=True)
                         await asyncio.sleep(.3)
                 await driver.click("Save working")

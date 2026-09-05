@@ -8,16 +8,19 @@
     "node": ">=22.16.0"
   },
   "scripts": {
-    "dev": "vite --host 127.0.0.1",
-    "build": "tsc -b && vite build",
+    "dev": "node scripts/version.mjs sync && vite --host 127.0.0.1",
+    "build": "node scripts/version.mjs sync && tsc -b && vite build",
     "typecheck": "tsc -b --pretty false",
-    "tauri": "tauri",
-    "desktop": "tauri dev",
+    "tauri": "node scripts/version.mjs sync && tauri",
+    "desktop": "node scripts/version.mjs sync && tauri dev",
+    "version:sync": "node scripts/version.mjs sync",
+    "version:check": "node scripts/version.mjs check",
+    "test:release": "node --test scripts/tests/*.test.mjs",
     "test": "cargo test --workspace --locked",
     "test:ui": "playwright test",
     "lint": "tsc -b && cargo clippy --workspace --all-targets --locked -- -D warnings",
-    "format": "prettier --write src tests-ui *.json *.ts index.html && cargo fmt --all",
-    "format:check": "prettier --check src tests-ui *.json *.ts index.html && cargo fmt --all -- --check"
+    "format": "prettier --write src tests-ui scripts/*.mjs scripts/tests/*.mjs *.json *.ts index.html && cargo fmt --all",
+    "format:check": "prettier --check src tests-ui scripts/*.mjs scripts/tests/*.mjs *.json *.ts index.html && cargo fmt --all -- --check"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",

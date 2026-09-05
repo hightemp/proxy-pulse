@@ -35,6 +35,13 @@ impl Default for Control {
     }
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum Permit {
+    Granted,
+    WaitUntil(Instant),
+    Stopped,
+}
+
 impl Control {
     pub fn cancel(&self) {
         self.cancelled.store(true, Ordering::SeqCst);
@@ -53,23 +60,38 @@ impl Control {
         }
         !self.is_cancelled() && Instant::now() < deadline
     }
+    fn request_permit(
+        &self,
+        rate: u32,
+        deadline: Instant,
+        clock: impl FnOnce() -> Instant,
+    ) -> Permit {
+        let Ok(mut next) = self.next_request.lock() else {
+            return Permit::Stopped;
+        };
+        // Sample the clock under the same lock as the admission decision. The
+        // injected clock lets tests verify boundaries without OS scheduling jitter.
+        let now = clock();
+        if self.is_cancelled() || now >= deadline {
+            return Permit::Stopped;
+        }
+        if now < *next {
+            return Permit::WaitUntil(*next);
+        }
+        *next = now + Duration::from_secs_f64(1.0 / rate as f64);
+        Permit::Granted
+    }
+
     fn acquire(&self, rate: u32, deadline: Instant) -> bool {
         loop {
-            if self.is_cancelled() || Instant::now() >= deadline {
-                return false;
-            }
-            let Ok(mut next) = self.next_request.lock() else {
-                return false;
-            };
-            let now = Instant::now();
-            if now >= *next {
-                *next = now + Duration::from_secs_f64(1.0 / rate as f64);
-                return true;
-            }
-            let until = *next;
-            drop(next);
-            if !self.wait_until(until, deadline) {
-                return false;
+            match self.request_permit(rate, deadline, Instant::now) {
+                Permit::Granted => return true,
+                Permit::Stopped => return false,
+                Permit::WaitUntil(until) => {
+                    if !self.wait_until(until, deadline) {
+                        return false;
+                    }
+                }
             }
         }
     }
@@ -731,4 +753,106 @@ pub fn check(
     }
     result.attempts = attempts;
     result
+}
+
+#[cfg(test)]
+mod pacing_tests {
+    use super::*;
+    use std::sync::Barrier;
+
+    fn control_at(now: Instant) -> Control {
+        Control {
+            next_request: Mutex::new(now),
+            ..Control::default()
+        }
+    }
+
+    #[test]
+    fn admits_only_at_the_configured_interval_boundary() {
+        for (rate, interval) in [
+            (1, Duration::from_secs(1)),
+            (10, Duration::from_millis(100)),
+            (100, Duration::from_millis(10)),
+        ] {
+            let now = Instant::now();
+            let control = control_at(now);
+            let deadline = now + Duration::from_secs(30);
+            assert_eq!(
+                control.request_permit(rate, deadline, || now),
+                Permit::Granted
+            );
+            assert_eq!(
+                control.request_permit(rate, deadline, || now),
+                Permit::WaitUntil(now + interval)
+            );
+            assert_eq!(
+                control.request_permit(rate, deadline, || now + interval - Duration::from_nanos(1)),
+                Permit::WaitUntil(now + interval)
+            );
+            assert_eq!(
+                control.request_permit(rate, deadline, || now + interval),
+                Permit::Granted
+            );
+        }
+    }
+
+    #[test]
+    fn a_delayed_worker_cannot_accumulate_a_burst_of_permits() {
+        let now = Instant::now();
+        let control = control_at(now);
+        let delayed = now + Duration::from_secs(10);
+        let deadline = delayed + Duration::from_secs(1);
+        assert_eq!(
+            control.request_permit(10, deadline, || now),
+            Permit::Granted
+        );
+        assert_eq!(
+            control.request_permit(10, deadline, || delayed),
+            Permit::Granted
+        );
+        for _ in 0..10 {
+            assert_eq!(
+                control.request_permit(10, deadline, || delayed),
+                Permit::WaitUntil(delayed + Duration::from_millis(100))
+            );
+        }
+    }
+
+    #[test]
+    fn simultaneous_workers_share_one_global_permit() {
+        let now = Instant::now();
+        let control = control_at(now);
+        let barrier = Barrier::new(16);
+        let granted = thread::scope(|scope| {
+            let handles: Vec<_> = (0..16)
+                .map(|_| {
+                    scope.spawn(|| {
+                        barrier.wait();
+                        control.request_permit(10, now + Duration::from_secs(1), || now)
+                    })
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|handle| handle.join().unwrap())
+                .filter(|permit| *permit == Permit::Granted)
+                .count()
+        });
+        assert_eq!(granted, 1);
+    }
+
+    #[test]
+    fn cancelled_or_expired_checks_do_not_consume_a_permit() {
+        let now = Instant::now();
+        let control = control_at(now);
+        assert_eq!(control.request_permit(10, now, || now), Permit::Stopped);
+        assert_eq!(*control.next_request.lock().unwrap(), now);
+        control.cancel();
+        assert_eq!(
+            control.request_permit(10, now + Duration::from_secs(1), || now),
+            Permit::Stopped
+        );
+        assert_eq!(*control.next_request.lock().unwrap(), now);
+        assert!(!control.acquire(10, now + Duration::from_secs(1)));
+    }
 }

@@ -3,6 +3,7 @@ use curl::{
     easy::{Auth, Easy2, Handler, InfoType, WriteError},
     multi::Multi,
 };
+use socket2::Socket;
 use std::{
     collections::{HashMap, VecDeque},
     net::IpAddr,
@@ -121,6 +122,8 @@ impl Control {
 
 #[derive(Default)]
 struct Response {
+    sockets: Vec<Socket>,
+    tcp_connected: bool,
     body: Vec<u8>,
     header_bytes: usize,
     too_large: bool,
@@ -137,7 +140,43 @@ struct Response {
     address_unsupported: bool,
 }
 
+impl Response {
+    fn observe_tcp_connection(&mut self) {
+        // Older libcurl reports connect_time/primary_ip only after SOCKS succeeds.
+        // Query the OS while the handshake is pending, before curl closes on error.
+        self.tcp_connected |= self.sockets.iter().any(|socket| socket.peer_addr().is_ok());
+        if self.tcp_connected {
+            self.sockets.clear();
+        }
+    }
+}
+
 impl Handler for Response {
+    fn open_socket(
+        &mut self,
+        family: std::ffi::c_int,
+        socktype: std::ffi::c_int,
+        protocol: std::ffi::c_int,
+    ) -> Option<curl_sys::curl_socket_t> {
+        // Match curl's default CLOEXEC socket creation. Owned duplicates avoid
+        // inspecting a closed/reused descriptor; they never read or write data.
+        // Release them on connection, or when this attempt ends (including cancel).
+        let socket = Socket::new(family.into(), socktype.into(), Some(protocol.into())).ok()?;
+        if !self.tcp_connected {
+            self.sockets.push(socket.try_clone().ok()?);
+        }
+        #[cfg(unix)]
+        {
+            use std::os::fd::IntoRawFd;
+            Some(socket.into_raw_fd())
+        }
+        #[cfg(windows)]
+        {
+            use std::os::windows::io::IntoRawSocket;
+            Some(socket.into_raw_socket())
+        }
+    }
+
     fn write(&mut self, data: &[u8]) -> Result<usize, WriteError> {
         if self.body.len() + data.len() > 65536 {
             self.too_large = true;
@@ -325,7 +364,7 @@ fn probe(
         );
     }
     let multi = Multi::new();
-    let Ok(handle) = multi.add2(easy) else {
+    let Ok(mut handle) = multi.add2(easy) else {
         return attempt(
             protocol,
             url,
@@ -349,6 +388,7 @@ fn probe(
                 "The network event loop failed.",
             );
         }
+        handle.get_mut().observe_tcp_connection();
         let mut result = None;
         multi.messages(|message| {
             if let Some(value) = message.result_for2(&handle) {
@@ -364,7 +404,8 @@ fn probe(
     };
     let response_code = handle.response_code().unwrap_or(0);
     let connect_code = handle.http_connectcode().unwrap_or(0);
-    let tcp_connected = handle.connect_time().unwrap_or_default() > Duration::ZERO
+    let tcp_connected = handle.get_ref().tcp_connected
+        || handle.connect_time().unwrap_or_default() > Duration::ZERO
         || handle
             .primary_ip()
             .ok()

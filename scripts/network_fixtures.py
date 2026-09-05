@@ -72,6 +72,12 @@ class Fixtures:
         writer.write(f"HTTP/1.1 {status} Test\r\nContent-Type: application/json\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n".encode() + body)
         await writer.drain()
 
+    async def silent(self, reader, writer):
+        # Accept TCP and consume the greeting, but never answer any protocol.
+        # Exit on client close so timeout/cancellation does not leave handlers alive.
+        while await reader.read(4096):
+            pass
+
     async def relay(self, reader, writer, upstream_reader, upstream_writer):
         async def pump(source, target):
             try:
@@ -219,12 +225,13 @@ async def acceptance():
         socks_denied = await fixtures.listen("socks_denied", fixtures.socks(5, deny=True))
         deny = await fixtures.listen("deny", fixtures.http_proxy(deny=True))
         trap = await fixtures.listen("trap", fixtures.http_proxy())
+        silent = await fixtures.listen("silent", fixtures.silent)
         closed_proxy = socket.socket()
         closed_proxy.bind(("127.0.0.1", 0))
         closed_port = closed_proxy.getsockname()[1]
         env = dict(os.environ, HTTP_PROXY=f"http://127.0.0.1:{trap}", HTTPS_PROXY=f"http://127.0.0.1:{trap}", ALL_PROXY=f"http://127.0.0.1:{trap}", NO_PROXY="*", http_proxy=f"http://127.0.0.1:{trap}", https_proxy=f"http://127.0.0.1:{trap}", all_proxy=f"http://127.0.0.1:{trap}", no_proxy="*")
 
-        async def run(name, proxy, url=None, expected="Working", code=None, trust=True, extra=None):
+        async def run(name, proxy, url=None, expected="Working", code=None, trust=True, extra=None, stage=None):
             settings = dict(DEFAULT, url=url or f"https://127.0.0.1:{https_target}/")
             settings.update(extra or {})
             process = await asyncio.create_subprocess_exec(str(ROOT / "target/debug/examples/check"), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE, env=env)
@@ -235,6 +242,8 @@ async def acceptance():
             assert result["status"] == expected, (name, result)
             if code:
                 assert result["code"] == code, (name, result)
+            if stage:
+                assert result["stage"] == stage, (name, result)
             assert b"fixture-secret" not in stdout + stderr, name
             checks.append(dict(name=name, status=result["status"], code=result["code"], duration_ms=result["totalDurationMs"]))
             print(f"PASS {name}: {result['status']} {result['code']}", flush=True)
@@ -271,8 +280,19 @@ async def acceptance():
             await run("response limit", f"http://127.0.0.1:{http}", url=f"https://localhost:{https_target}/large", expected="Inconclusive", code="RESPONSE_TOO_LARGE")
             await run("fallback via same proxy", f"http://127.0.0.1:{http}", url=f"https://localhost:{https_target}/status/503", extra={"fallbackUrl": f"https://localhost:{https_target}/"})
             await run("non-proxy server", f"127.0.0.1:{http_target}", expected="Inconclusive")
-            await run("explicit wrong protocol", f"socks5://127.0.0.1:{http}", expected="Inconclusive")
+            wrong_protocol = await run("explicit wrong protocol", f"socks5://127.0.0.1:{http}", expected="Inconclusive", code="PROXY_HANDSHAKE_TIMEOUT", stage="protocol")
+            assert wrong_protocol["detected"] is None, wrong_protocol
+            assert [attempt["protocol"] for attempt in wrong_protocol["attempts"]] == ["socks5"], wrong_protocol
+            for scheme in ("http", "https", "socks4", "socks4a", "socks5", "socks5h"):
+                result = await run(f"silent {scheme} handshake", f"{scheme}://127.0.0.1:{silent}", expected="Inconclusive", code="PROXY_HANDSHAKE_TIMEOUT", stage="protocol")
+                assert result["detected"] is None, result
+            for scheme, port in [("http", http), ("socks5h", socks5)]:
+                await run(f"{scheme} target TLS timeout", f"{scheme}://127.0.0.1:{port}", url=f"https://127.0.0.1:{silent}/", expected="Inconclusive", code="TARGET_TIMEOUT", stage="target")
+                await run(f"{scheme} target response timeout", f"{scheme}://127.0.0.1:{port}", url=f"https://127.0.0.1:{https_target}/slow", expected="Inconclusive", code="TARGET_TIMEOUT", stage="target")
+            await run("HTTP forward target timeout", f"http://127.0.0.1:{http}", url=f"http://127.0.0.1:{http_target}/slow", expected="Inconclusive", code="TARGET_TIMEOUT", stage="target")
             await run("proxy connection refused", f"http://127.0.0.1:{closed_port}", expected="Failed", code="CONNECTION_REFUSED")
+            for scheme in ("https", "socks4", "socks4a", "socks5", "socks5h"):
+                await run(f"{scheme} connection refused", f"{scheme}://127.0.0.1:{closed_port}", expected="Failed", code="CONNECTION_REFUSED", stage="connect")
             await run("proxy hostname failure", "http://missing-proxy.invalid:8080", expected="Failed", code="PROXY_DNS_FAILED")
             assert fixtures.connections.get("trap", 0) == 0, "Environment proxy was used"
             assert "remote-only.invalid" in fixtures.destinations, "Remote DNS was not observed"

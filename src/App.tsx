@@ -172,6 +172,7 @@ export default function App() {
   const deferredQuery = useDeferredValue(query);
   const [sort, setSort] = useState("added");
   const [selected, setSelected] = useState(new Set<number>());
+  const [removalIds, setRemovalIds] = useState<number[] | null>(null);
   const [scrollTop, setScrollTop] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(440);
   const viewport = useRef<HTMLDivElement>(null);
@@ -216,6 +217,14 @@ export default function App() {
     if (snapshot.rows.length || snapshot.reset) {
       for (const row of snapshot.rows) rowMap.current.set(row.id, row);
       setRows([...rowMap.current.values()]);
+      if (snapshot.reset) {
+        setSelected((previous) => {
+          const remaining = new Set(
+            [...previous].filter((id) => rowMap.current.has(id)),
+          );
+          return remaining.size === previous.size ? previous : remaining;
+        });
+      }
     }
     revision.current = snapshot.revision;
     setMeta(snapshot);
@@ -326,6 +335,11 @@ export default function App() {
             .includes(q)),
     );
   }, [sortedRows, filter, deferredQuery]);
+  const hasHiddenRemoval = useMemo(() => {
+    if (modal !== "clear" || removalIds === null) return false;
+    const visibleIds = new Set(filteredRows.map((row) => row.id));
+    return removalIds.some((id) => !visibleIds.has(id));
+  }, [modal, removalIds, filteredRows]);
   useEffect(() => {
     if (viewport.current) viewport.current.scrollTop = 0;
     setScrollTop(0);
@@ -725,12 +739,29 @@ export default function App() {
                   </button>
                 )}
               {selected.size > 0 && (
-                <button
-                  disabled={busy || meta.running}
-                  onClick={() => void startCheck([...selected])}
-                >
-                  Check selected ({selected.size})
-                </button>
+                <>
+                  <button
+                    disabled={busy || meta.running}
+                    onClick={() => void startCheck([...selected])}
+                  >
+                    Check selected ({selected.size})
+                  </button>
+                  <button
+                    className="danger"
+                    disabled={busy || meta.running}
+                    onClick={() => {
+                      const ids = rows
+                        .filter((row) => selected.has(row.id))
+                        .map((row) => row.id);
+                      if (!ids.length) return;
+                      setRemovalIds(ids);
+                      openModal("clear");
+                    }}
+                  >
+                    <Trash2 size={15} />
+                    Remove selected ({selected.size})
+                  </button>
+                </>
               )}
               {meta.running ? (
                 <button
@@ -763,7 +794,10 @@ export default function App() {
                 title="Clear list"
                 aria-label="Clear list"
                 disabled={busy || meta.running || !rows.length}
-                onClick={() => openModal("clear")}
+                onClick={() => {
+                  setRemovalIds(null);
+                  openModal("clear");
+                }}
               >
                 <Trash2 size={17} />
               </button>
@@ -2047,29 +2081,55 @@ export default function App() {
 
       {modal === "clear" && (
         <Modal
-          title="Clear your proxy list?"
-          subtitle="This removes records and results from your saved list. Export a backup first if you want to keep them."
-          close={() => setModal(null)}
+          title={
+            removalIds === null
+              ? "Clear your proxy list?"
+              : "Remove selected proxies?"
+          }
+          subtitle={
+            removalIds === null
+              ? "This removes records and results from your saved list. Export a backup first if you want to keep them."
+              : "Only the selected records and their results will be removed from your saved list."
+          }
+          close={() => !busy && setModal(null)}
         >
           <div className="modal-body">
             <ErrorText error={error} />
-            <p>{rows.length.toLocaleString()} records will be removed.</p>
+            <p>
+              {(removalIds?.length ?? rows.length).toLocaleString()} records
+              will be removed.
+            </p>
+            {hasHiddenRemoval && (
+              <p className="hint">
+                Your selection includes records hidden by the current filter.
+              </p>
+            )}
           </div>
           <footer className="modal-footer">
-            <button onClick={() => setModal(null)}>Cancel</button>
+            <button disabled={busy} onClick={() => setModal(null)}>
+              Cancel
+            </button>
             <button
               className="danger"
-              disabled={busy}
+              disabled={busy || meta.running || removalIds?.length === 0}
               onClick={() =>
                 void run(async () => {
-                  await invoke("clear_entries", { ids: [] });
+                  // An empty ID list means clear all in the backend. Only the
+                  // explicit Clear list action may send that value.
+                  if (removalIds !== null && !removalIds.length) return;
+                  await invoke("clear_entries", { ids: removalIds ?? [] });
                   setSelected(new Set());
                   setModal(null);
+                  setToast(
+                    removalIds === null
+                      ? "Proxy list cleared."
+                      : `${removalIds.length.toLocaleString()} selected records removed.`,
+                  );
                   await refresh();
                 })
               }
             >
-              Clear list
+              {removalIds === null ? "Clear list" : "Remove selected"}
             </button>
           </footer>
         </Modal>

@@ -78,6 +78,8 @@ The default check requests an IP echo endpoint over HTTPS. Settings also support
 
 Open a row for protocol attempts, the sanitized check URL and error details. Latency measures the successful attempt, including setup and response validation. It is not ICMP ping or bandwidth. Authentication validity is reported separately; a successful request does not automatically prove that a supplied password was required.
 
+Select row checkboxes to reveal **Check selected** and **Remove selected (N)** above the table. Removal asks for confirmation and applies to the entire selection, including rows hidden by the current filter. Other rows stay in the list; the change is saved automatically. Removal is disabled while checks are running.
+
 ## Export and session data
 
 **Copy working / Save working** use proxy URLs. **Copy failed / Save failed** preserve original records. **More** offers Checked, Inconclusive, Selected, Filtered and All scopes, with URLs, original lines, compact text, CSV reports and versioned JSON reports.

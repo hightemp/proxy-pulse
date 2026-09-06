@@ -22,6 +22,7 @@ Verified behavior:
 3. Change appearance and URL, then restore settings alone while the proxy list is empty. Restore proxies independently, merge the full backup without duplicates, then explicitly replace the list. All settings, records and results return. Invalid JSON is rejected with a visible error and preserves the list.
 4. Prevent file replacement in the isolated data directory and edit a row. **Not saved** appears and the previous main file stays intact. Remove the obstruction; background saving recovers, and the edited row survives another restart.
 5. Close during a controlled slow request using **Stop, save and quit**, then restart. The incomplete check is Cancelled and no network run resumes automatically.
+6. Select two of three records, including an invalid row. **Remove selected (N)** is visible at 1000×650 and disabled during a check. Filter the selected rows out of view, cancel the confirmation once, then confirm removal. Only those two records disappear; selection clears and the remaining record survives restart. Screenshot: `artifacts/native-remove-selected.png`.
 
 Artifacts: `artifacts/storage-results.json`, `artifacts/storage-smoke.log` and `artifacts/native-storage-backup.png`. The screenshot was visually inspected. The script is available through `make test-storage`; it requires Linux, Xvfb, WebKitWebDriver, tauri-driver, xclip and xdotool.
 

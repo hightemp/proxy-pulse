@@ -210,9 +210,12 @@ async def main():
                 await driver.wait("return document.querySelectorAll('.proxy-row').length===3;")
                 snapshot = await driver.ipc("snapshot", {"since": 0})
                 assert snapshot["rows"][1]["host"] == "changed.example"
+                first_checkbox = await driver.find(f"input[aria-label={json.dumps('Select ' + snapshot['rows'][0]['address'])}]")
+                await driver.command("POST", f"/element/{first_checkbox}/click", {})
                 slow = dict(preferences["check"], url=f"http://127.0.0.1:{target}/slow")
                 await driver.ipc("start_check", {"ids": [snapshot["rows"][0]["id"]], "settings": slow, "detectAgain": False})
                 await driver.wait("return Boolean(document.querySelector('.status-checking'));")
+                assert await driver.js("return [...document.querySelectorAll('button')].find(e=>e.textContent.trim()==='Remove selected (1)')?.disabled;")
                 await driver.js("window.__TAURI_INTERNALS__.invoke('plugin:window|close',{label:'main'}).catch(()=>{});return true;")
                 await driver.wait("return document.querySelector('dialog h2')?.textContent==='Stop checking and quit?';")
                 await driver.click("Stop, save and quit")
@@ -223,9 +226,40 @@ async def main():
                 await start()
                 await driver.wait("return document.querySelectorAll('.status-cancelled').length===1;")
                 assert not (await driver.ipc("snapshot", {"since": 0}))["running"]
-                await close_app()
                 print("PASS native close: flush on exit and interrupted check restored as Cancelled", flush=True)
-                (ROOT / "artifacts/storage-results.json").write_text(json.dumps({"native_restart": True, "native_backup_export": ["full", "proxies", "settings"], "native_restore": ["settings", "proxies", "merge", "replace"], "invalid_backup_rejected": True, "save_failure_recovery": True, "close_during_run": True, "isolated_user_data": True}, indent=2) + "\n")
+
+                # Select a completed/cancelled row and an invalid row, leaving one
+                # record unselected. Filtering must not change the removal scope.
+                snapshot = await driver.ipc("snapshot", {"since": 0})
+                for row in (snapshot["rows"][0], snapshot["rows"][2]):
+                    checkbox = await driver.find(f"input[aria-label={json.dumps('Select ' + row['address'])}]")
+                    await driver.command("POST", f"/element/{checkbox}/click", {})
+                await driver.command("POST", "/window/rect", {"width": 1000, "height": 650})
+                await driver.wait("return [...document.querySelectorAll('button')].some(e=>e.textContent.trim()==='Remove selected (2)' && !e.disabled);")
+                assert await driver.js("return document.documentElement.scrollWidth <= innerWidth;")
+                await driver.screenshot("native-remove-selected.png")
+                await driver.fill("input[aria-label='Search proxies']", "changed.example")
+                await driver.wait("return document.querySelectorAll('.proxy-row').length===1;")
+                await driver.click("Remove selected (2)")
+                await driver.wait("return document.querySelector('dialog h2')?.textContent==='Remove selected proxies?';")
+                assert await driver.js("return document.querySelector('dialog').textContent.includes('2 records will be removed.') && document.querySelector('dialog').textContent.includes('hidden by the current filter');")
+                await driver.click("Cancel")
+                assert (await driver.ipc("snapshot", {"since": 0}))["total"] == 3
+                await driver.click("Remove selected (2)")
+                await driver.click("Remove selected")
+                await driver.wait("return !document.querySelector('dialog') && ![...document.querySelectorAll('button')].some(e=>e.textContent.includes('Remove selected'));")
+                await driver.fill("input[aria-label='Search proxies']", "")
+                remaining = await driver.ipc("snapshot", {"since": 0})
+                assert remaining["total"] == 1 and remaining["rows"][0]["host"] == "changed.example"
+                await wait_saved()
+                await close_app()
+                await start()
+                await driver.wait("return document.querySelectorAll('.proxy-row').length===1;")
+                remaining = await driver.ipc("snapshot", {"since": 0})
+                assert remaining["total"] == 1 and remaining["rows"][0]["host"] == "changed.example"
+                await close_app()
+                print("PASS native selected removal: blocked during checks, confirmation/cancel, hidden selections, remaining row and restart", flush=True)
+                (ROOT / "artifacts/storage-results.json").write_text(json.dumps({"native_restart": True, "native_backup_export": ["full", "proxies", "settings"], "native_restore": ["settings", "proxies", "merge", "replace"], "invalid_backup_rejected": True, "save_failure_recovery": True, "close_during_run": True, "selected_removal": True, "selected_removal_restart": True, "isolated_user_data": True}, indent=2) + "\n")
             finally:
                 if driver.session:
                     with contextlib.suppress(Exception):

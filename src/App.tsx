@@ -20,6 +20,7 @@ import {
   ChevronDown,
   Clipboard,
   Copy,
+  Database,
   FileText,
   FolderOpen,
   Globe2,
@@ -42,6 +43,9 @@ import {
 import {
   defaultSettings,
   type AppError,
+  type BackupPreview,
+  type Preferences,
+  type StorageStatus,
   type ExportOptions,
   type ImportOptions,
   type Preview,
@@ -154,6 +158,15 @@ export default function App() {
   const [settings, setSettings] = useState<Settings>(defaultSettings);
   const [draft, setDraft] = useState<Settings>(defaultSettings);
   const [theme, setTheme] = useState("system");
+  const [draftTheme, setDraftTheme] = useState("system");
+  const [preferencesLoaded, setPreferencesLoaded] = useState(false);
+  const [storage, setStorage] = useState<StorageStatus | null>(null);
+  const [backupScope, setBackupScope] = useState("full");
+  const [backupPreview, setBackupPreview] = useState<BackupPreview | null>(
+    null,
+  );
+  const [restoreMode, setRestoreMode] = useState("merge");
+  const [restoreSettings, setRestoreSettings] = useState(false);
   const [filter, setFilter] = useState<string>("All");
   const [query, setQuery] = useState("");
   const deferredQuery = useDeferredValue(query);
@@ -165,6 +178,7 @@ export default function App() {
   const [modal, setModal] = useState<
     | "import"
     | "settings"
+    | "backup"
     | "export"
     | "details"
     | "edit"
@@ -214,6 +228,8 @@ export default function App() {
     const poll = async () => {
       try {
         await refresh();
+        const status = await invoke<StorageStatus>("storage_status");
+        if (!stopped) setStorage(status);
       } catch {
         if (!stopped)
           setError(
@@ -223,23 +239,23 @@ export default function App() {
       if (!stopped) timer = setTimeout(poll, 300);
     };
     void poll();
-    void invoke<{ theme: string; concurrency: number; rateLimit: number }>(
-      "load_preferences",
-    ).then((prefs) => {
-      if (stopped) return;
-      if (["system", "light", "dark"].includes(prefs.theme))
+    void invoke<Preferences>("load_preferences")
+      .then((prefs) => {
+        if (stopped) return;
         setTheme(prefs.theme);
-      if (prefs.concurrency > 0 && prefs.rateLimit > 0)
-        setSettings((s) => ({
-          ...s,
-          concurrency: prefs.concurrency,
-          rateLimit: prefs.rateLimit,
-        }));
-    });
+        setSettings(prefs.check);
+        setPreferencesLoaded(true);
+      })
+      .catch(() =>
+        setError(
+          "Could not load saved settings. Restart the app before editing settings.",
+        ),
+      );
     const unlisten = getCurrentWindow().onCloseRequested((event) => {
       event.preventDefault();
       setError("");
-      setModal("quit");
+      if (metaRef.current.running) setModal("quit");
+      else void quit();
     });
     return () => {
       stopped = true;
@@ -454,7 +470,7 @@ export default function App() {
       return count;
     });
   }
-  async function quit(save: boolean) {
+  async function quit(withoutSaving = false) {
     await run(async () => {
       if (metaRef.current.running) {
         await invoke("stop_check");
@@ -468,17 +484,13 @@ export default function App() {
             throw new Error("Checks are still stopping. Please try again.");
         }
       }
-      if (save) {
-        const saved = await invoke<number | null>("export_data", {
-          options: {
-            scope: "All",
-            format: "json",
-            credentials: true,
-            ids: sortedRows.map((r) => r.id),
-          },
-          destination: "file",
-        });
-        if (saved === null) return;
+      if (!withoutSaving) {
+        try {
+          await invoke("flush_workspace");
+        } catch (error) {
+          setModal("quit");
+          throw error;
+        }
       }
       await getCurrentWindow().destroy();
     });
@@ -529,13 +541,19 @@ export default function App() {
         </button>
         <button
           className="nav-item"
+          disabled={native && !preferencesLoaded}
           onClick={() => {
             setDraft(settings);
+            setDraftTheme(theme);
             openModal("settings");
           }}
         >
           <Settings2 size={18} />
           Settings
+        </button>
+        <button className="nav-item" onClick={() => openModal("backup")}>
+          <Database size={18} />
+          Backup & restore
         </button>
         <div className="sidebar-bottom">
           <div className="local-note">
@@ -567,7 +585,17 @@ export default function App() {
           <div>
             <div className="eyebrow">YOUR NETWORK, AT A GLANCE</div>
             <h1>
-              Proxy checker<span className="session-label">Session only</span>
+              Proxy checker
+              <span className="session-label">
+                {!native
+                  ? "Desktop preview"
+                  : storage?.error
+                    ? "Not saved"
+                    : storage?.savedRevision != null &&
+                        storage.savedRevision >= meta.revision
+                      ? "Saved locally"
+                      : "Saving…"}
+              </span>
             </h1>
             <p>Check your proxies. Keep the ones that work.</p>
           </div>
@@ -599,6 +627,16 @@ export default function App() {
           </div>
         )}
         {!modal && <ErrorText error={error} />}
+        {storage?.error && (
+          <ErrorText
+            error={`Changes are not saved. ${storage.error.message}`}
+          />
+        )}
+        {storage?.notice && (
+          <p className="storage-notice" role="status">
+            {storage.notice}
+          </p>
+        )}
         <section className="stats" aria-label="Check results">
           <div className="stat-card">
             <span className="stat-icon neutral">
@@ -609,7 +647,7 @@ export default function App() {
             <small>
               {meta.running
                 ? `${count("Queued")} queued · ${count("Checking")} checking`
-                : "In your current session"}
+                : "In your saved list"}
             </small>
           </div>
           <div className="stat-card">
@@ -1270,7 +1308,7 @@ export default function App() {
           </div>
           <footer className="modal-footer">
             <span className="hint">
-              UTF-8 · Up to 100,000 records · Credentials stay in this session
+              UTF-8 · Up to 100,000 records · Saved locally with credentials
             </span>
             <button
               disabled={busy || !input.trim()}
@@ -1463,12 +1501,15 @@ export default function App() {
             </div>
             <p className="hint">
               Auto detection may need five attempts. A short total timeout can
-              leave the result inconclusive. Check URLs are kept in this session
-              only.
+              leave the result inconclusive. All settings, including check URLs,
+              are saved on this device.
             </p>
             <label className="full-label">
               Appearance
-              <select value={theme} onChange={(e) => setTheme(e.target.value)}>
+              <select
+                value={draftTheme}
+                onChange={(e) => setDraftTheme(e.target.value)}
+              >
                 <option value="system">System theme</option>
                 <option value="light">Light</option>
                 <option value="dark">Dark</option>
@@ -1476,12 +1517,17 @@ export default function App() {
             </label>
           </div>
           <footer className="modal-footer">
-            <button onClick={() => setDraft(defaultSettings)}>
+            <button
+              onClick={() => {
+                setDraft(defaultSettings);
+                setDraftTheme("system");
+              }}
+            >
               Restore defaults
             </button>
             <button
               className="primary"
-              disabled={busy}
+              disabled={busy || !native || !preferencesLoaded}
               onClick={() =>
                 void run(async () => {
                   if (
@@ -1493,18 +1539,207 @@ export default function App() {
                     );
                   await invoke("save_preferences", {
                     preferences: {
-                      theme,
-                      concurrency: draft.concurrency,
-                      rateLimit: draft.rateLimit,
+                      theme: draftTheme,
+                      check: draft,
                     },
                   });
                   setSettings(draft);
+                  setTheme(draftTheme);
                   setModal(null);
-                  setToast("Settings updated for the next run.");
+                  setToast("Settings saved for the next run.");
                 })
               }
             >
               Save settings
+            </button>
+          </footer>
+        </Modal>
+      )}
+
+      {modal === "backup" && (
+        <Modal
+          title="Backup & restore"
+          subtitle="Move your proxies and settings to another installation, or keep a backup."
+          close={() => !busy && setModal(null)}
+        >
+          <div className="modal-body backup-body">
+            <ErrorText error={error} />
+            <section className="storage-summary">
+              <strong>Automatic saving</strong>
+              <p>
+                Your proxy list, credentials, last results and settings are
+                restored when you reopen the app.
+              </p>
+              {storage && (
+                <code className="storage-path">{storage.directory}</code>
+              )}
+              <p className="hint">
+                Local files and backups include passwords and saved check URLs
+                without encryption.
+              </p>
+              {storage?.error && (
+                <button
+                  disabled={busy}
+                  onClick={() =>
+                    void run(async () => {
+                      await invoke("flush_workspace");
+                      setStorage(await invoke<StorageStatus>("storage_status"));
+                      setToast("Workspace saved.");
+                    })
+                  }
+                >
+                  Retry saving
+                </button>
+              )}
+            </section>
+            <h3 className="subheading">Export a backup</h3>
+            <label className="full-label">
+              Include in backup
+              <select
+                value={backupScope}
+                onChange={(e) => setBackupScope(e.target.value)}
+                disabled={busy}
+              >
+                <option value="full">
+                  Full workspace — proxies, results and settings
+                </option>
+                <option value="proxies">Proxies and results only</option>
+                <option value="settings">Settings only</option>
+              </select>
+            </label>
+            <button
+              disabled={busy || !native}
+              onClick={() =>
+                void run(async () => {
+                  const saved = await invoke<boolean>("export_backup", {
+                    scope: backupScope,
+                  });
+                  if (saved) setToast("Backup exported.");
+                })
+              }
+            >
+              <ArrowDownToLine size={16} />
+              Export backup
+            </button>
+            <h3 className="subheading">Import a backup</h3>
+            <p className="hint">
+              Choose a Proxy Pulse backup JSON file. For TXT/CSV/TSV lists, use
+              Add proxies. Exported reports are not backups.
+            </p>
+            <button
+              disabled={busy || !native || meta.running}
+              onClick={() =>
+                void run(async () => {
+                  setBackupPreview(null);
+                  const preview = await invoke<BackupPreview | null>(
+                    "preview_backup",
+                  );
+                  if (preview) {
+                    setBackupPreview(preview);
+                    setRestoreMode(
+                      preview.summary.proxies === null ? "skip" : "merge",
+                    );
+                    setRestoreSettings(preview.summary.hasSettings);
+                  }
+                })
+              }
+            >
+              <FolderOpen size={16} />
+              Choose backup file
+            </button>
+            {meta.running && (
+              <p className="hint">Stop checking before importing a backup.</p>
+            )}
+            {backupPreview && (
+              <section className="backup-preview" aria-label="Backup preview">
+                <strong>{backupPreview.sourceName}</strong>
+                <p>
+                  {backupPreview.summary.proxies === null
+                    ? "No proxy list"
+                    : `${backupPreview.summary.proxies.toLocaleString()} records · ${backupPreview.summary.results.toLocaleString()} results · ${backupPreview.summary.invalid.toLocaleString()} invalid`}
+                </p>
+                <p>
+                  {backupPreview.summary.hasSettings
+                    ? "Settings included"
+                    : "No settings"}
+                  {backupPreview.summary.hasCredentials
+                    ? " · Contains credentials"
+                    : ""}
+                </p>
+                {backupPreview.summary.proxies !== null && (
+                  <label className="full-label">
+                    Proxy list
+                    <select
+                      value={restoreMode}
+                      onChange={(e) => setRestoreMode(e.target.value)}
+                      disabled={busy}
+                    >
+                      <option value="merge">
+                        Merge — skip duplicates, keep existing results
+                      </option>
+                      <option value="replace">Replace the current list</option>
+                      <option value="skip">Do not import proxies</option>
+                    </select>
+                  </label>
+                )}
+                {backupPreview.summary.hasSettings && (
+                  <label className="check-label">
+                    <input
+                      type="checkbox"
+                      checked={restoreSettings}
+                      disabled={busy}
+                      onChange={(e) => setRestoreSettings(e.target.checked)}
+                    />
+                    Import settings and appearance
+                  </label>
+                )}
+                {restoreMode === "replace" && (
+                  <p className="hint">
+                    Your {rows.length.toLocaleString()} current records will be
+                    replaced with the backup list.
+                  </p>
+                )}
+              </section>
+            )}
+          </div>
+          <footer className="modal-footer">
+            <button disabled={busy} onClick={() => setModal(null)}>
+              Close
+            </button>
+            <button
+              className="primary"
+              disabled={
+                busy ||
+                !native ||
+                meta.running ||
+                !backupPreview ||
+                (restoreMode === "skip" && !restoreSettings)
+              }
+              onClick={() =>
+                void run(async () => {
+                  const result = await invoke<{
+                    added: number;
+                    skipped: number;
+                  }>("restore_backup", {
+                    mode: restoreMode,
+                    settings: restoreSettings,
+                  });
+                  const preferences =
+                    await invoke<Preferences>("load_preferences");
+                  setSettings(preferences.check);
+                  setTheme(preferences.theme);
+                  setSelected(new Set());
+                  await refresh();
+                  setBackupPreview(null);
+                  setToast(
+                    `Backup imported. ${result.added.toLocaleString()} records added, ${result.skipped.toLocaleString()} duplicates skipped.`,
+                  );
+                })
+              }
+            >
+              {restoreMode === "replace"
+                ? "Replace list and import"
+                : "Import backup"}
             </button>
           </footer>
         </Modal>
@@ -1813,7 +2048,7 @@ export default function App() {
       {modal === "clear" && (
         <Modal
           title="Clear your proxy list?"
-          subtitle="This removes records and results from the current session. Save anything you need first."
+          subtitle="This removes records and results from your saved list. Export a backup first if you want to keep them."
           close={() => setModal(null)}
         >
           <div className="modal-body">
@@ -1843,34 +2078,34 @@ export default function App() {
       {modal === "quit" && (
         <Modal
           title={
-            meta.running
-              ? "Stop checking and quit?"
-              : "Save your session before quitting?"
+            meta.running ? "Stop checking and quit?" : "Save before quitting"
           }
-          subtitle="Proxy lists and results are kept in memory only. Save a JSON report to keep your data, including credentials."
+          subtitle="Your list, completed results and settings are saved automatically on this device."
           close={() => !busy && setModal(null)}
         >
           <div className="modal-body">
             <ErrorText error={error} />
             <p>
               {meta.running
-                ? "Completed results will be kept in the export; unfinished checks will be cancelled."
-                : `${rows.length.toLocaleString()} records in this session.`}
+                ? "Unfinished checks will be cancelled. Completed results will be restored next time."
+                : "Saving did not finish. Retry saving, or quit with only the last successfully saved data."}
             </p>
           </div>
           <footer className="modal-footer">
             <button disabled={busy} onClick={() => setModal(null)}>
-              {meta.running ? "Keep checking" : "Cancel"}
+              {meta.running ? "Keep checking" : "Keep open"}
             </button>
-            <button disabled={busy} onClick={() => void quit(false)}>
-              Quit without saving
-            </button>
+            {!!error && (
+              <button disabled={busy} onClick={() => void quit(true)}>
+                Quit without saving
+              </button>
+            )}
             <button
               className="primary"
-              disabled={busy || !rows.length}
-              onClick={() => void quit(true)}
+              disabled={busy}
+              onClick={() => void quit()}
             >
-              Save and quit
+              {meta.running ? "Stop, save and quit" : "Retry save and quit"}
             </button>
           </footer>
         </Modal>
@@ -1916,8 +2151,12 @@ export default function App() {
             </p>
             <p>
               Clipboard and file exports include passwords when{" "}
-              <strong>Include credentials</strong> is selected. Nothing is
-              uploaded as a proxy list or stored automatically between sessions.
+              <strong>Include credentials</strong> is selected. Lists,
+              credentials, results and settings are saved locally between
+              sessions. Use
+              <strong> Backup & restore</strong> to move them to another
+              installation. Stored files and backups are not encrypted. There is
+              no cloud upload.
             </p>
           </div>
           <footer className="modal-footer">

@@ -29,7 +29,7 @@ impl Default for ImportOptions {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct ParsedRow {
     pub proxy: Option<Proxy>,
     pub error: Option<AppError>,
@@ -39,6 +39,23 @@ pub struct ParsedRow {
     pub line: usize,
     pub header: Option<String>,
     pub delimiter: Option<u8>,
+}
+
+pub fn validate_proxy(proxy: &Proxy) -> AppResult<()> {
+    let normalized = make_proxy(
+        &bracket_host(&proxy.host),
+        &proxy.port.to_string(),
+        proxy.credentials.as_ref().map(|c| c.username.clone()),
+        proxy.credentials.as_ref().and_then(|c| c.password.clone()),
+        proxy.protocol,
+    )?;
+    if normalized != *proxy {
+        return Err(error(
+            "INVALID_BACKUP",
+            "The backup contains a noncanonical proxy address.",
+        ));
+    }
+    Ok(())
 }
 
 pub struct ParsedImport {

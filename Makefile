@@ -1,4 +1,4 @@
-.PHONY: help doctor install-deps version version-check dev preview build build-debug package appimage release release-dry-run release-notes test test-release test-integration test-ui test-native test-startup lint format typecheck quality clean
+.PHONY: help doctor install-deps version version-check dev preview build build-debug package appimage release release-dry-run release-notes test test-release test-integration test-ui test-native test-startup test-storage lint format typecheck quality clean
 
 help: ## Show available commands
 	@python3 scripts/doctor.py --help-targets
@@ -63,6 +63,10 @@ test-ui: ## Run browser layout and accessibility smoke checks
 
 test-native: ## Run the real Tauri GUI smoke (requires a running tauri-driver)
 	python3 scripts/native_smoke.py
+
+test-storage: ## Verify native restart, autosave and backup dialogs in isolated Linux user folders
+	pnpm tauri build --debug --no-bundle -- --locked
+	python3 scripts/storage_smoke.py
 
 lint: ## Check Rust and TypeScript without warnings
 	cargo clippy --workspace --all-targets --locked -- -D warnings

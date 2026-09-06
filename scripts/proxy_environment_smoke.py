@@ -94,7 +94,7 @@ async def main():
                 for name, variables in cases:
                     Trap.hits = 0
                     wrapper = directory / "launch-app"
-                    wrapper.write_text(f"#!{sys.executable}\nimport os,sys\nenv=dict(os.environ)\nfor key in list(env):\n if key.lower() in ('http_proxy','https_proxy','all_proxy','no_proxy'):env.pop(key)\nenv.update({variables!r})\nenv['XDG_CONFIG_HOME']={str(directory / 'config')!r}\nos.execve({binary!r},[{binary!r},*sys.argv[1:]],env)\n")
+                    wrapper.write_text(f"#!{sys.executable}\nimport os,sys\nenv=dict(os.environ)\nfor key in list(env):\n if key.lower() in ('http_proxy','https_proxy','all_proxy','no_proxy'):env.pop(key)\nenv.update({variables!r})\nenv['XDG_CONFIG_HOME']={str(directory / 'config' / name)!r}\nenv['XDG_DATA_HOME']={str(directory / 'data' / name)!r}\nos.execve({binary!r},[{binary!r},*sys.argv[1:]],env)\n")
                     wrapper.chmod(0o700)
                     driver = Driver(port)
                     try:

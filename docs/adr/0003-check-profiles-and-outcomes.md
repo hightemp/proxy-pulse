@@ -6,7 +6,7 @@ The default profile sends GET to `https://api64.ipify.org?format=json` and requi
 
 Working means that the current request satisfied the profile. Failed identifies a concrete connection, authentication, proxy certificate or tunnel rejection. Inconclusive identifies insufficient protocol evidence, an unsupported client capability, a target failure, a target certificate problem or an exhausted detection budget. Invalid and Cancelled are separate.
 
-The result stores the settings snapshot internally. The UI receives a sanitized endpoint URL with its query removed. Profile URLs, body match strings, raw records and credentials are not automatically persisted. Export reports also sanitize the endpoint URL.
+The result stores the settings snapshot internally. The UI receives a sanitized endpoint URL with its query removed. As of the 2026-09-06 storage requirement, profile URLs, body match strings, raw records and credentials are automatically persisted in the private local workspace and portable backups; the row-view IPC still excludes secrets. See [storage and backups](../storage.md). Export reports also sanitize the endpoint URL.
 
 For automatic detection, the first complete success wins. A cancelled or incomplete run remains cancelled/inconclusive. Confirmed authentication/tunnel errors and invalid proxy certificates take precedence over generic timeouts from unrelated candidates. A target failure on an established path takes precedence over unconfirmed connection failures from other candidates. All attempts remain available for diagnosis.
 

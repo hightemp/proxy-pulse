@@ -58,3 +58,38 @@ test("layout remains within the minimum desktop width", async ({ page }) => {
     page.getByRole("button", { name: "Save settings" }),
   ).toBeVisible();
 });
+
+test("backup controls explain file contents and fit the minimum window", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1000, height: 650 });
+  await page.goto("/");
+  await page
+    .getByRole("button", { name: "Backup & restore", exact: true })
+    .click();
+  const dialog = page.getByRole("dialog", { name: "Backup & restore" });
+  await expect(dialog).toBeVisible();
+  await expect(
+    dialog.getByText("without encryption", { exact: false }),
+  ).toBeVisible();
+  await dialog.getByLabel("Include in backup").selectOption("settings");
+  await expect(dialog.getByLabel("Include in backup")).toHaveValue("settings");
+  await expect(
+    dialog.getByRole("button", { name: "Export backup", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Import backup", exact: true }),
+  ).toBeDisabled();
+  await expect(
+    dialog.getByRole("button", { name: "Close", exact: true }),
+  ).toBeVisible();
+  const dimensions = await dialog.evaluate((el) => ({
+    width: el.scrollWidth,
+    visible: el.clientWidth,
+    bottom: el.getBoundingClientRect().bottom,
+  }));
+  expect(dimensions.width).toBeLessThanOrEqual(dimensions.visible);
+  expect(dimensions.bottom).toBeLessThanOrEqual(650);
+  await page.keyboard.press("Escape");
+  await expect(dialog).not.toBeVisible();
+});

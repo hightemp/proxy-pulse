@@ -67,7 +67,7 @@ impl Protocol {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Credentials {
     pub username: String,
     pub password: Option<String>,
@@ -79,7 +79,7 @@ impl fmt::Debug for Credentials {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct Proxy {
     pub host: String,
     pub port: u16,
@@ -222,7 +222,7 @@ pub fn safe_url(value: &str) -> String {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Attempt {
     pub protocol: Protocol,
@@ -237,7 +237,7 @@ pub struct Attempt {
     pub check_url: String,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CheckResult {
     pub status: Status,

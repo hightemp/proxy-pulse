@@ -8,6 +8,7 @@ from pathlib import Path
 import tempfile
 import subprocess
 import shutil
+import sys
 import urllib.error
 import urllib.request
 from network_fixtures import Fixtures, ROOT
@@ -35,8 +36,8 @@ class Driver:
     async def command(self, method, path, payload=None):
         return await asyncio.to_thread(self.request, method, f"/session/{self.session}{path}", payload)
 
-    async def create(self):
-        binary = os.environ.get("PROXY_PULSE_BINARY", str(ROOT / "target/debug/proxy-pulse"))
+    async def create(self, binary=None):
+        binary = binary or os.environ.get("PROXY_PULSE_BINARY", str(ROOT / "target/debug/proxy-pulse"))
         result = await asyncio.to_thread(self.request, "POST", "/session", {"capabilities": {"alwaysMatch": {"tauri:options": {"application": binary}}}})
         self.session = result["sessionId"]
 
@@ -74,6 +75,17 @@ class Driver:
         (ROOT / "artifacts" / name).write_bytes(base64.b64decode(data))
 
 
+def isolated_application(directory):
+    if sys.platform != "linux":
+        raise RuntimeError("This WebKit smoke runner requires Linux and isolated XDG folders")
+    directory = Path(directory)
+    binary = os.environ.get("PROXY_PULSE_BINARY", str(ROOT / "target/debug/proxy-pulse"))
+    wrapper = directory / "launch-app"
+    wrapper.write_text(f"#!{sys.executable}\nimport os,sys\nenv=dict(os.environ)\nenv['XDG_DATA_HOME']={str(directory / 'data')!r}\nenv['XDG_CONFIG_HOME']={str(directory / 'config')!r}\nos.execve({binary!r},[{binary!r},*sys.argv[1:]],env)\n")
+    wrapper.chmod(0o700)
+    return str(wrapper)
+
+
 async def main():
     driver = Driver(int(os.environ.get("TAURI_DRIVER_PORT", "4457")))
     with tempfile.TemporaryDirectory(prefix="proxy-pulse-native-") as directory:
@@ -84,7 +96,7 @@ async def main():
         auth = await fixtures.listen("auth", fixtures.http_proxy(authentication=True))
         socks = await fixtures.listen("socks", fixtures.socks(5))
         try:
-            await driver.create()
+            await driver.create(isolated_application(directory))
             await driver.wait("return Boolean(document.querySelector('h1'));")
             assert await driver.js("return window.isTauri;")
             await driver.click("Settings")

@@ -87,6 +87,27 @@ export interface Settings {
   totalTimeoutMs: number;
   retries: number;
 }
+export interface Preferences {
+  theme: string;
+  check: Settings;
+}
+export interface StorageStatus {
+  directory: string;
+  savedRevision: number | null;
+  error: AppError | null;
+  notice: string | null;
+}
+export interface BackupPreview {
+  sourceName: string;
+  summary: {
+    createdAt: string;
+    proxies: number | null;
+    invalid: number;
+    results: number;
+    hasSettings: boolean;
+    hasCredentials: boolean;
+  };
+}
 export interface ImportOptions {
   format: string;
   delimiter: string;

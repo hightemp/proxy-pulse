@@ -7,8 +7,12 @@ use proxy_pulse_core::{
     model::{AppError, AppResult, CheckSettings},
     parser::{ImportOptions, MAX_BYTES},
     session::{self, Preview, SharedSession, Snapshot},
+    storage::{
+        Backup, BackupPreview, BackupScope, Preferences, RestoreMode, RestoreResult, StorageStatus,
+        Store,
+    },
 };
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::{
     io::Read,
     sync::{Arc, Mutex},
@@ -182,52 +186,194 @@ async fn export_data(
     .map_err(|_| AppError::new("INTERNAL_ERROR", "Export worker failed."))?
 }
 
-#[derive(Default, Deserialize, Serialize)]
-#[serde(default, rename_all = "camelCase")]
-struct Preferences {
-    theme: String,
-    concurrency: usize,
-    rate_limit: u32,
+type SharedStore = Arc<Store>;
+type PendingBackup = Arc<Mutex<Option<Backup>>>;
+
+#[tauri::command]
+fn load_preferences(state: State<'_, SharedSession>) -> AppResult<Preferences> {
+    Ok(session::lock(&state)?.preferences.clone())
 }
 
 #[tauri::command]
-fn load_preferences(app: tauri::AppHandle) -> Preferences {
-    app.path()
-        .app_config_dir()
-        .ok()
-        .and_then(|path| std::fs::read(path.join("preferences.json")).ok())
-        .and_then(|data| serde_json::from_slice(&data).ok())
-        .unwrap_or_default()
+async fn save_preferences(
+    state: State<'_, SharedSession>,
+    store: State<'_, SharedStore>,
+    preferences: Preferences,
+) -> AppResult<()> {
+    let state = Arc::clone(&state);
+    let store = Arc::clone(&store);
+    tauri::async_runtime::spawn_blocking(move || store.set_preferences(&state, preferences))
+        .await
+        .map_err(|_| AppError::new("STORAGE_ERROR", "The save worker failed."))?
 }
 
 #[tauri::command]
-fn save_preferences(app: tauri::AppHandle, preferences: Preferences) -> AppResult<()> {
-    if !matches!(preferences.theme.as_str(), "system" | "light" | "dark")
-        || !(1..=200).contains(&preferences.concurrency)
-        || !(1..=100).contains(&preferences.rate_limit)
-    {
-        return Err(AppError::new(
-            "INVALID_SETTINGS",
-            "Invalid application preferences.",
-        ));
-    }
-    let directory = app
-        .path()
-        .app_config_dir()
-        .map_err(|_| AppError::new("SETTINGS_ERROR", "Cannot locate the settings folder."))?;
-    std::fs::create_dir_all(&directory)
-        .map_err(|_| AppError::new("SETTINGS_ERROR", "Cannot create the settings folder."))?;
-    let text = serde_json::to_string_pretty(&preferences)
-        .map_err(|_| AppError::new("SETTINGS_ERROR", "Cannot serialize settings."))?;
-    export::save_atomic(&directory.join("preferences.json"), &text)
+async fn storage_status(store: State<'_, SharedStore>) -> AppResult<StorageStatus> {
+    let store = Arc::clone(&store);
+    tauri::async_runtime::spawn_blocking(move || store.status())
+        .await
+        .map_err(|_| AppError::new("STORAGE_ERROR", "The storage worker failed."))?
+}
+
+#[tauri::command]
+async fn flush_workspace(
+    state: State<'_, SharedSession>,
+    store: State<'_, SharedStore>,
+) -> AppResult<()> {
+    let state = Arc::clone(&state);
+    let store = Arc::clone(&store);
+    tauri::async_runtime::spawn_blocking(move || store.save(&state))
+        .await
+        .map_err(|_| AppError::new("STORAGE_ERROR", "The save worker failed."))?
+}
+
+#[tauri::command]
+async fn export_backup(
+    app: tauri::AppHandle,
+    state: State<'_, SharedSession>,
+    scope: BackupScope,
+) -> AppResult<bool> {
+    let state = Arc::clone(&state);
+    tauri::async_runtime::spawn_blocking(move || {
+        let backup = Backup::capture(&*session::lock(&state)?, scope);
+        let Some(file) = app
+            .dialog()
+            .file()
+            .set_file_name("proxy-pulse-backup.json")
+            .add_filter("Proxy Pulse backup", &["json"])
+            .blocking_save_file()
+        else {
+            return Ok(false);
+        };
+        let path = file
+            .into_path()
+            .map_err(|_| AppError::new("FILE_WRITE_FAILED", "Select a local output file."))?;
+        if let (Ok(parent), Ok(directory)) = (
+            path.parent()
+                .unwrap_or(std::path::Path::new("."))
+                .canonicalize(),
+            app.path()
+                .app_data_dir()
+                .and_then(|p| p.canonicalize().map_err(Into::into)),
+        ) {
+            if parent.starts_with(directory) {
+                return Err(AppError::new(
+                    "INVALID_EXPORT",
+                    "Choose a backup location outside the application data folder.",
+                ));
+            }
+        }
+        export::save_atomic(&path, &backup.encode()?)?;
+        Ok(true)
+    })
+    .await
+    .map_err(|_| AppError::new("INTERNAL_ERROR", "The backup worker failed."))?
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BackupFilePreview {
+    source_name: String,
+    summary: BackupPreview,
+}
+
+#[tauri::command]
+async fn preview_backup(
+    app: tauri::AppHandle,
+    pending: State<'_, PendingBackup>,
+) -> AppResult<Option<BackupFilePreview>> {
+    let pending = Arc::clone(&pending);
+    tauri::async_runtime::spawn_blocking(move || {
+        *pending
+            .lock()
+            .map_err(|_| AppError::new("INTERNAL_ERROR", "Backup preview unavailable."))? = None;
+        let Some(file) = app
+            .dialog()
+            .file()
+            .add_filter("Proxy Pulse backup", &["json"])
+            .blocking_pick_file()
+        else {
+            return Ok(None);
+        };
+        let path = file
+            .into_path()
+            .map_err(|_| AppError::new("FILE_READ_FAILED", "Select a local file."))?;
+        let backup = Backup::read(&path)?;
+        let preview = BackupFilePreview {
+            source_name: path
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .into_owned(),
+            summary: backup.preview(),
+        };
+        *pending
+            .lock()
+            .map_err(|_| AppError::new("INTERNAL_ERROR", "Backup preview unavailable."))? =
+            Some(backup);
+        Ok(Some(preview))
+    })
+    .await
+    .map_err(|_| AppError::new("INTERNAL_ERROR", "The backup worker failed."))?
+}
+
+#[tauri::command]
+async fn restore_backup(
+    state: State<'_, SharedSession>,
+    store: State<'_, SharedStore>,
+    pending: State<'_, PendingBackup>,
+    mode: RestoreMode,
+    settings: bool,
+) -> AppResult<RestoreResult> {
+    let state = Arc::clone(&state);
+    let store = Arc::clone(&store);
+    let pending = Arc::clone(&pending);
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut pending = pending
+            .lock()
+            .map_err(|_| AppError::new("INTERNAL_ERROR", "Backup preview unavailable."))?;
+        let backup = pending
+            .as_ref()
+            .ok_or_else(|| AppError::new("NO_PREVIEW", "Choose a backup file first."))?;
+        let result = store.restore(&state, backup, mode, settings)?;
+        *pending = None;
+        Ok(result)
+    })
+    .await
+    .map_err(|_| AppError::new("INTERNAL_ERROR", "The restore worker failed."))?
 }
 
 fn main() {
     // Environment changes must precede every runtime, plugin and worker thread.
     startup::configure_before_runtime();
-    let state: SharedSession = Arc::new(Mutex::new(session::Session::default()));
     let result = tauri::Builder::default()
-        .manage(state)
+        .manage(PendingBackup::default())
+        .setup(|app| {
+            let directory = app.path().app_data_dir()?;
+            let legacy = app
+                .path()
+                .app_config_dir()
+                .ok()
+                .map(|p| p.join("preferences.json"));
+            let (store, restored) = Store::open(directory, legacy.as_deref());
+            let store = Arc::new(store);
+            let state: SharedSession = Arc::new(Mutex::new(restored));
+            app.manage(Arc::clone(&state));
+            app.manage(Arc::clone(&store));
+            let state = Arc::downgrade(&state);
+            let store = Arc::downgrade(&store);
+            std::thread::spawn(move || loop {
+                let (Some(state), Some(store)) = (state.upgrade(), store.upgrade()) else {
+                    break;
+                };
+                // Errors remain visible through storage_status; only one writer can run.
+                let _ = store.save(&state);
+                drop(state);
+                drop(store);
+                std::thread::sleep(std::time::Duration::from_secs(1));
+            });
+            Ok(())
+        })
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .invoke_handler(tauri::generate_handler![
@@ -243,7 +389,12 @@ fn main() {
             import_file,
             export_data,
             load_preferences,
-            save_preferences
+            save_preferences,
+            storage_status,
+            flush_workspace,
+            export_backup,
+            preview_backup,
+            restore_backup
         ])
         .on_window_event(|window, event| {
             if matches!(event, tauri::WindowEvent::Destroyed) {
@@ -252,6 +403,9 @@ fn main() {
                         control.cancel();
                     }
                 }
+                let _ = window
+                    .state::<SharedStore>()
+                    .save(&window.state::<SharedSession>());
             }
         })
         .run(tauri::generate_context!());

@@ -73,7 +73,11 @@ Checked includes Working, Failed and Inconclusive. It excludes Invalid and Cance
 
 Reusable lists include credentials by default; reports omit them by default. Unknown Auto protocols and incompatible source schemas require an appropriate format instead of silently dropping rows. CSV reports escape spreadsheet formula prefixes; URLs and JSON preserve exact credential data.
 
-Proxy lists, passwords and custom profiles live in memory. Only theme, concurrency and request pacing are saved automatically. Save a file before quitting to retain data. Reports are not a session-restore format yet. There is no telemetry, cloud account or system proxy switcher.
+Your proxy list, credentials, last results, full check settings and appearance are saved automatically and restored at startup. **Saved locally / Saving… / Not saved** shows the current state. Closing an idle window flushes the data; closing during a check offers **Stop, save and quit**. Interrupted checks restore as Cancelled.
+
+Open **Backup & restore** to export a full workspace, proxies with results, or settings alone. Import shows the file contents before applying them: merge skips exact duplicates and keeps existing results, while replace restores the list including its duplicates. Settings can be imported independently. Portable backup JSON files are distinct from the existing CSV/JSON reports; ordinary proxy lists still use **Add proxies**.
+
+The data folder is shown in **Backup & restore**. On Linux it defaults to `~/.local/share/dev.hightemp.proxypulse/` (or `$XDG_DATA_HOME/dev.hightemp.proxypulse/`), on macOS to `~/Library/Application Support/dev.hightemp.proxypulse/`, and on Windows to `%APPDATA%/dev.hightemp.proxypulse/`. Local files and backups contain passwords and custom URLs without encryption; Unix data directories and files use owner-only permissions. There is no telemetry, cloud account or system proxy switcher. See [storage and backups](docs/storage.md) for format, recovery and limits.
 
 ## Verify
 
@@ -81,6 +85,7 @@ Proxy lists, passwords and custom profiles live in memory. Only theme, concurren
 make quality           # Format, lint, types, core contracts, local protocols, browser UI
 make test-integration  # Real loopback proxy matrix; no public proxies
 make test-ui           # Browser layout/help tests (not native protocol evidence)
+make test-storage      # Linux: real app restart, autosave, backup/restore file dialogs
 ```
 
 Python 3 and OpenSSL are required for protocol fixtures. Browser checks use local Chrome when available, or an installed Playwright Chromium (`pnpm exec playwright install chromium`). `CHROME_PATH` can select a test browser. The UI test wrapper removes proxy environment variables only for its child process, so loopback readiness checks are not sent through an external proxy.
@@ -94,7 +99,7 @@ env -u HTTP_PROXY -u HTTPS_PROXY -u ALL_PROXY -u http_proxy -u https_proxy -u al
 make test-native
 ```
 
-The native script exercises actual Rust IPC, local proxies, the rendered WebView, clipboard groups, reports, search and cancellation. Results are written under ignored `artifacts/`. [Initial Linux evidence](docs/verification/initial-linux.md) distinguishes completed checks from remaining work.
+The native script exercises actual Rust IPC, local proxies, the rendered WebView, clipboard groups, reports, search and cancellation. It launches the app with temporary XDG data/config folders so tests cannot change your saved workspace. Results are written under ignored `artifacts/`. [Initial Linux evidence](docs/verification/initial-linux.md) distinguishes completed checks from remaining work.
 
 With xdotool available (on PATH or under `artifacts/xdotool/extracted/usr/bin/`) and xclip on PATH, the Linux native test also drives the save/open choosers. It pastes paths to avoid GTK completion changing simulated keystrokes, discovers the matching driver's isolated display and reports this optional coverage as `native_file_dialogs_verified`.
 

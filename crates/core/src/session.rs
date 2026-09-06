@@ -2,6 +2,7 @@ use crate::{
     checker::{self, Control},
     model::{AppError, AppResult, CheckResult, CheckSettings, Protocol, Proxy, Status},
     parser::{self, ImportOptions, ParsedImport, ParsedRow, MAX_ROWS},
+    storage::Preferences,
 };
 use serde::Serialize;
 use std::{
@@ -113,6 +114,7 @@ pub struct Snapshot {
 
 #[derive(Default)]
 pub struct Session {
+    pub preferences: Preferences,
     pub entries: Vec<Entry>,
     pub revision: u64,
     next_id: u64,
@@ -126,6 +128,28 @@ pub struct Session {
 }
 
 impl Session {
+    pub fn set_preferences(&mut self, preferences: Preferences) -> AppResult<()> {
+        preferences.validate()?;
+        self.preferences = preferences;
+        self.revision += 1;
+        Ok(())
+    }
+
+    pub(crate) fn replace_entries(&mut self, entries: Vec<Entry>) {
+        self.revision += 1;
+        self.reset_revision = self.revision;
+        self.entries = entries;
+        for entry in &mut self.entries {
+            self.next_id += 1;
+            entry.id = self.next_id;
+            entry.version = 1;
+            entry.revision = self.revision;
+        }
+        self.pending = None;
+        self.scheduled = 0;
+        self.completed = 0;
+    }
+
     pub fn ensure_idle(&self) -> AppResult<()> {
         if self.running {
             Err(AppError::new(

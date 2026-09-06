@@ -1,8 +1,20 @@
-# Proxy Pulse
+<p align="center">
+  <img src="src-tauri/icons/icon.png" alt="Proxy Pulse icon" width="112" height="112">
+</p>
+
+<h1 align="center">Proxy Pulse</h1>
+
+<p align="center">
+  <a href="https://github.com/hightemp/proxy-pulse/actions/workflows/quality.yml"><img src="https://github.com/hightemp/proxy-pulse/actions/workflows/quality.yml/badge.svg" alt="Quality checks"></a>
+  <a href="https://github.com/hightemp/proxy-pulse/actions/workflows/release.yml"><img src="https://github.com/hightemp/proxy-pulse/actions/workflows/release.yml/badge.svg" alt="Release build"></a>
+  <a href="https://github.com/hightemp/proxy-pulse/releases/latest"><img src="https://img.shields.io/github/v/release/hightemp/proxy-pulse" alt="Latest release"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
+  <a href="https://v2.tauri.app/"><img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&amp;logoColor=white" alt="Built with Tauri 2"></a>
+</p>
 
 A local desktop proxy checker built with Tauri, Rust and React. Import a mixed list, verify real requests through each proxy, and copy or save the results.
 
-The first Linux implementation is available.
+![Proxy Pulse main window with the proxy list and check results](screenshots/2026-09-06_12-15.png)
 
 ## Run the application
 

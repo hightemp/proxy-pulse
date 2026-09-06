@@ -10,6 +10,7 @@
   <a href="https://github.com/hightemp/proxy-pulse/releases/latest"><img src="https://img.shields.io/github/v/release/hightemp/proxy-pulse" alt="Latest release"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT license"></a>
   <a href="https://v2.tauri.app/"><img src="https://img.shields.io/badge/Tauri-2-24C8D8?logo=tauri&amp;logoColor=white" alt="Built with Tauri 2"></a>
+  [![](https://asdertasd.site/counter/proxy-pulse)](https://asdertasd.site/counter/proxy-pulse)
 </p>
 
 A local desktop proxy checker built with Tauri, Rust and React. Import a mixed list, verify real requests through each proxy, and copy or save the results.
